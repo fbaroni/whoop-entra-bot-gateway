@@ -5,22 +5,40 @@ import { getValidAccessToken } from './oauthClient.js';
 const WHOOP_API_BASE = 'https://api.prod.whoop.com/developer/v1';
 const HTTP_TIMEOUT_MS = 8000;
 
-interface WhoopRecoveryResponse {
+interface WhoopCycleResponse {
   records: Array<{
-    cycle_id: number;
-    sleep_id: number;
+    id: number;
     user_id: number;
     created_at: string;
     updated_at: string;
+    start: string;
+    end: string | null;
+    timezone_offset: string;
+    score_state: string;
     score: {
-      user_calibrating: boolean;
-      recovery_score: number;
-      resting_heart_rate: number;
-      hrv_rmssd_milli: number;
-      spo2_percentage?: number;
-      skin_temp_celsius?: number;
+      strain: number;
+      kilojoule: number;
+      average_heart_rate: number;
+      max_heart_rate: number;
     };
   }>;
+}
+
+interface WhoopRecoveryResponse {
+  cycle_id: number;
+  sleep_id: number;
+  user_id: number;
+  created_at: string;
+  updated_at: string;
+  score_state: string;
+  score: {
+    user_calibrating: boolean;
+    recovery_score: number;
+    resting_heart_rate: number;
+    hrv_rmssd_milli: number;
+    spo2_percentage?: number;
+    skin_temp_celsius?: number;
+  };
 }
 
 interface WhoopSleepResponse {
@@ -99,20 +117,40 @@ async function whoopApiRequest<T>(endpoint: string): Promise<T> {
 
 export async function fetchTodayData(): Promise<WhoopToday | null> {
   try {
-    // Fetch most recent recovery and sleep data (limit 1, no date filter)
-    // WHOOP API v1 endpoints - recovery is at root, sleep is under activity
-    const [recoveryData, sleepData] = await Promise.all([
-      whoopApiRequest<WhoopRecoveryResponse>('/recovery?limit=1'),
-      whoopApiRequest<WhoopSleepResponse>('/activity/sleep?limit=1'),
-    ]);
+    // First get the latest cycle to find the cycle_id
+    const cycleData = await whoopApiRequest<WhoopCycleResponse>('/cycle?limit=1');
+    const latestCycle = cycleData.records[0];
 
-    const latestRecovery = recoveryData.records[0];
-    const latestSleep = sleepData.records.find((s) => !s.nap); // Exclude naps
-
-    if (!latestRecovery && !latestSleep) {
-      logger.info('No WHOOP data available for today');
+    if (!latestCycle) {
+      logger.info('No WHOOP cycle data available');
       return null;
     }
+
+    logger.info('Found cycle', { cycleId: latestCycle.id, strain: latestCycle.score?.strain });
+
+    // Try to get recovery for this cycle (may not exist yet if user hasn't slept)
+    let recoveryData: WhoopRecoveryResponse | null = null;
+    try {
+      recoveryData = await whoopApiRequest<WhoopRecoveryResponse>(`/cycle/${latestCycle.id}/recovery`);
+    } catch (error) {
+      // Recovery may not be available yet - that's OK
+      logger.info('Recovery not available for cycle', { 
+        cycleId: latestCycle.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    // Try to get sleep data
+    let sleepData: WhoopSleepResponse | null = null;
+    try {
+      sleepData = await whoopApiRequest<WhoopSleepResponse>('/activity/sleep?limit=1');
+    } catch (error) {
+      logger.info('Sleep data not available', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    const latestSleep = sleepData?.records?.find((s) => !s.nap);
 
     // Calculate sleep hours from sleep data
     let sleepHours = 0;
@@ -126,11 +164,13 @@ export async function fetchTodayData(): Promise<WhoopToday | null> {
 
     const result: WhoopToday = {
       sleepHours,
-      recoveryScore: latestRecovery?.score?.recovery_score ?? 0,
-      hrv: latestRecovery?.score?.hrv_rmssd_milli
-        ? Math.round(latestRecovery.score.hrv_rmssd_milli)
+      recoveryScore: recoveryData?.score?.recovery_score ?? 0,
+      hrv: recoveryData?.score?.hrv_rmssd_milli
+        ? Math.round(recoveryData.score.hrv_rmssd_milli)
         : undefined,
-      restingHeartRate: latestRecovery?.score?.resting_heart_rate,
+      restingHeartRate: recoveryData?.score?.resting_heart_rate,
+      strain: latestCycle.score?.strain,
+      avgHeartRate: latestCycle.score?.average_heart_rate,
     };
 
     logger.info('Fetched WHOOP data', {

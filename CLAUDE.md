@@ -1,68 +1,75 @@
-# Triathlon Assistant Bot (Clawdbot + Entra + WHOOP)
+# Triathlon Assistant Bot (Clawdbot + WHOOP)
 
 ## Goal
-A private training copilot accessed via Clawdbot chat. The bot calls a protected API (Azure Container Apps)
-to generate today's training plan and (optionally) fetch WHOOP recovery/sleep.
+A personal training copilot accessed via Clawdbot chat (Telegram/WhatsApp). Fetches WHOOP fitness data and generates personalized daily training plans.
 
-## Architecture (high level)
-- Bot runtime: Clawdbot channel adapter (Telegram/WhatsApp)
-- Bot service: Node/TypeScript (or minimal handler) that:
-  - Requests Entra token (client credentials)
-  - Calls the API endpoints:
-    - POST /api/today-plan
-    - GET /api/whoop/today (optional)
-- API auth: Entra ID JWT validation (audience/issuer/roles)
+## Architecture
+```
+Telegram/WhatsApp → Clawdbot (triathlon-coach skill) → API (:3000) → WHOOP API
+```
 
-## Key flows
-1) User types "plan"
-2) Bot tries GET /api/whoop/today (autofill sleepHours + recoveryScore)
-3) Bot asks user for missing inputs (muscleSoreness, activityType if needed)
-4) Bot calls POST /api/today-plan
-5) Bot responds with a short plan summary.
+- **API**: Express server with WHOOP OAuth integration
+- **Bot**: Clawdbot skill that calls the API endpoints
+- **Auth**: API key (Bearer token)
 
-## Commands
-- plan
-- set activity <zwift|strength|walk|swim>
-- status
-- help
-- connect whoop (optional, if OAuth is implemented)
+## API Endpoints
+- `GET /health` - Health check (no auth)
+- `GET /api/whoop/today` - Current WHOOP metrics (strain, HR, sleep, recovery)
+- `POST /api/today-plan` - Generate training plan
+- `GET /api/whoop/connect` - Start WHOOP OAuth
+- `GET /api/whoop/callback` - OAuth callback
+- `GET /api/whoop/status` - Connection status
+- `POST /api/whoop/disconnect` - Disconnect WHOOP
 
-## Environments
-### Bot env vars
-- API_BASE_URL=
-- TENANT_ID=
-- BOT_CLIENT_ID=
-- BOT_CLIENT_SECRET=
-- API_AUDIENCE=api://<triathlon-assistant-api-app-id>
-- LOG_LEVEL=info
+## Usage (via Clawdbot)
+- Ask naturally: "give me my training plan", "how should I train today?"
+- The skill fetches WHOOP data and asks for missing inputs
 
-### API env vars (Azure)
-- TENANT_ID=
-- API_AUDIENCE=api://<triathlon-assistant-api-app-id>
-- WHOOP_CLIENT_ID= (optional)
-- WHOOP_CLIENT_SECRET= (optional)
-- WHOOP_REDIRECT_URI= (optional)
+## Environment Variables
+```
+API_KEY=              # API auth (optional)
+WHOOP_CLIENT_ID=      # WHOOP Developer app
+WHOOP_CLIENT_SECRET=  # WHOOP Developer app
+WHOOP_REDIRECT_URI=   # e.g., http://localhost:3000/api/whoop/callback
+LOG_LEVEL=info
+PORT=3000
+```
 
-## Local development
-- Install: pnpm install
-- Run bot: pnpm bot:dev
-- Run api: pnpm api:dev
+## Development
+```bash
+pnpm install
+pnpm api:dev          # Run API with hot reload
+pnpm bot:dev          # Run CLI bot (testing)
+pnpm build            # Build for production
+```
 
-## Security rules
-- Never log OAuth tokens (WHOOP or Entra)
-- Use Entra app roles; require role Whoop.Read for /api/whoop/*
-- Requests must validate issuer + audience
-- Keep secrets in Azure Container Apps secrets / local env only
+## Clawdbot Integration
+Skill located at: `~/clawd/skills/triathlon-coach/SKILL.md`
 
-## Coding guidelines
-- TypeScript strict
-- Small modules: auth/, whoop/, apiClient/, commands/
-- Timeouts on all HTTP calls (8s)
-- Friendly error messages for network/auth failures
+Config in `~/.clawdbot/clawdbot.json`:
+```json
+{
+  "skills": {
+    "entries": {
+      "triathlon-coach": {
+        "enabled": true,
+        "env": {
+          "TRIATHLON_API_URL": "http://localhost:3000",
+          "TRIATHLON_API_KEY": ""
+        }
+      }
+    }
+  }
+}
+```
 
-## Tasks (incremental)
-1) Implement Entra token client in bot
-2) Implement JWT validation middleware in API
-3) Protect /api/whoop/today and /api/today-plan
-4) Add WHOOP endpoints (optional)
-5) Add daily automation/webhooks (optional)
+## Security Rules
+- Never log OAuth tokens
+- Use API_KEY for endpoint protection
+- Keep secrets in .env (not committed)
+
+## Coding Guidelines
+- TypeScript strict mode
+- Small modules: auth/, whoop/, routes/
+- 8s timeout on all HTTP calls
+- Friendly error messages

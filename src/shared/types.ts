@@ -6,6 +6,8 @@ export const whoopTodaySchema = z.object({
   recoveryScore: z.number().min(0).max(100),
   hrv: z.number().optional(),
   restingHeartRate: z.number().optional(),
+  strain: z.number().optional(),
+  avgHeartRate: z.number().optional(),
 });
 
 export type WhoopToday = z.infer<typeof whoopTodaySchema>;
@@ -15,8 +17,8 @@ export const activityTypeSchema = z.enum(['zwift', 'strength', 'walk', 'swim', '
 export type ActivityType = z.infer<typeof activityTypeSchema>;
 
 export const todayPlanRequestSchema = z.object({
-  sleepHours: z.number().min(0).max(24),
-  recoveryScore: z.number().min(0).max(100),
+  sleepHours: z.number().min(0).max(24).optional(),
+  recoveryScore: z.number().min(0).max(100).optional(),
   muscleSoreness: z.number().min(1).max(10),
   activityType: activityTypeSchema.optional(),
 });

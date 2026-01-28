@@ -5,8 +5,17 @@ import {
   todayPlanRequestSchema,
 } from '../../shared/types.js';
 import { logger } from '../../shared/logger.js';
+import { fetchTodayData } from '../whoop/apiClient.js';
 
-function generatePlan(input: TodayPlanRequest): TodayPlanResponse {
+// Internal type for plan generation where fields are guaranteed
+interface PlanInput {
+  sleepHours: number;
+  recoveryScore: number;
+  muscleSoreness: number;
+  activityType?: TodayPlanRequest['activityType'];
+}
+
+function generatePlan(input: PlanInput): TodayPlanResponse {
   const { sleepHours, recoveryScore, muscleSoreness, activityType } = input;
 
   // Simple algorithm to determine training intensity
@@ -94,7 +103,37 @@ export async function handleTodayPlan(req: Request, res: Response): Promise<void
     return;
   }
 
-  const plan = generatePlan(parseResult.data);
+  const { muscleSoreness, activityType } = parseResult.data;
+  let { sleepHours, recoveryScore } = parseResult.data;
+
+  // If data is missing, try to fetch from WHOOP
+  if (sleepHours === undefined || recoveryScore === undefined) {
+    try {
+      const whoopData = await fetchTodayData();
+      if (whoopData) {
+        if (sleepHours === undefined) sleepHours = whoopData.sleepHours;
+        if (recoveryScore === undefined) recoveryScore = whoopData.recoveryScore;
+      }
+    } catch (error) {
+      logger.warn('Failed to fetch WHOOP data for today plan', { error });
+    }
+  }
+
+  // If still missing data, return error
+  if (sleepHours === undefined || recoveryScore === undefined) {
+    res.status(400).json({
+      error: 'Missing data',
+      message: 'Please provide sleepHours and recoveryScore, or connect WHOOP account',
+    });
+    return;
+  }
+
+  const plan = generatePlan({
+    sleepHours,
+    recoveryScore,
+    muscleSoreness,
+    activityType,
+  });
 
   logger.info('Generated training plan', {
     intensity: plan.intensity,
