@@ -14,7 +14,7 @@ Telegram/WhatsApp → Clawdbot (triathlon-coach skill) → API (:3000) → WHOOP
 
 ## API Endpoints
 - `GET /health` - Health check (no auth)
-- `GET /api/whoop/today` - Current WHOOP metrics (strain, HR, sleep, recovery)
+- `GET /api/whoop/today` - Current WHOOP metrics + raw WHOOP payloads
 - `POST /api/today-plan` - Generate training plan
 - `GET /api/whoop/connect` - Start WHOOP OAuth
 - `GET /api/whoop/callback` - OAuth callback
@@ -24,6 +24,11 @@ Telegram/WhatsApp → Clawdbot (triathlon-coach skill) → API (:3000) → WHOOP
 ## Usage (via Clawdbot)
 - Ask naturally: "give me my training plan", "how should I train today?"
 - The skill fetches WHOOP data and asks for missing inputs
+
+## WHOOP Today Response
+`/api/whoop/today` returns a compact summary plus full raw objects when available:
+- Summary: `sleepHours`, `sleepScore`, `recoveryScore`, `strain`, `avgHeartRate`, `maxHeartRate`, `kilojoule`, `hrv`, `restingHeartRate`
+- Raw payloads: `raw.cycle`, `raw.sleep`, `raw.recovery`
 
 ## Environment Variables
 ```

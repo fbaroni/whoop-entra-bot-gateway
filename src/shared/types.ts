@@ -4,10 +4,20 @@ import { z } from 'zod';
 export const whoopTodaySchema = z.object({
   sleepHours: z.number().min(0).max(24),
   recoveryScore: z.number().min(0).max(100),
-  hrv: z.number().optional(),
-  restingHeartRate: z.number().optional(),
+  sleepScore: z.number().min(0).max(100).optional(),
   strain: z.number().optional(),
   avgHeartRate: z.number().optional(),
+  maxHeartRate: z.number().optional(),
+  kilojoule: z.number().optional(),
+  hrv: z.number().optional(),
+  restingHeartRate: z.number().optional(),
+  raw: z
+    .object({
+      cycle: z.unknown().optional(),
+      sleep: z.unknown().optional(),
+      recovery: z.unknown().optional(),
+    })
+    .optional(),
 });
 
 export type WhoopToday = z.infer<typeof whoopTodaySchema>;

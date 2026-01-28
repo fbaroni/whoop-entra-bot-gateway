@@ -5,7 +5,8 @@ A personal training copilot that generates daily workout plans based on WHOOP fi
 ## Features
 
 - 🏊 Personalized training recommendations based on recovery metrics
-- ⌚ WHOOP integration (strain, heart rate, sleep, recovery)
+- ⌚ WHOOP integration (sleep, recovery, strain, HRV, heart rate)
+- 🧾 Raw WHOOP payloads returned for debugging/analytics
 - 💬 Chat interface via Clawdbot (Telegram/WhatsApp)
 - 🔒 API key authentication
 
@@ -97,11 +98,19 @@ Get current WHOOP metrics.
 ```json
 {
   "sleepHours": 7.5,
+  "sleepScore": 92.4,
   "recoveryScore": 68,
   "strain": 8.2,
   "avgHeartRate": 62,
+  "maxHeartRate": 164,
+  "kilojoule": 442,
   "hrv": 45,
-  "restingHeartRate": 52
+  "restingHeartRate": 52,
+  "raw": {
+    "cycle": { "...": "full cycle payload" },
+    "sleep": { "...": "full sleep payload" },
+    "recovery": { "...": "full recovery payload" }
+  }
 }
 ```
 
@@ -179,6 +188,8 @@ Currently available data (depends on app permissions):
 - ⚠️ Sleep (requires WHOOP app approval)
 
 If recovery/sleep return 404, your WHOOP Developer app may need additional permissions. Contact WHOOP support or check your app settings at [developer.whoop.com](https://developer.whoop.com).
+
+Raw WHOOP payloads are included under `raw` when available to help debug missing fields.
 
 ## Usage via Telegram
 
