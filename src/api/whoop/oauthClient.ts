@@ -7,7 +7,7 @@ const WHOOP_TOKEN_URL = 'https://api.prod.whoop.com/oauth/oauth2/token';
 const HTTP_TIMEOUT_MS = 8000;
 
 // Required scopes for recovery and sleep data
-const SCOPES = ['read:recovery', 'read:sleep', 'read:profile', 'read:cycles'];
+const SCOPES = ['read:recovery', 'read:sleep', 'read:profile', 'read:cycles', 'offline'];
 
 export function getAuthorizationUrl(state?: string): string {
   const config = getConfig();
