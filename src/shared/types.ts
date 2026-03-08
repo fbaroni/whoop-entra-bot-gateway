@@ -22,6 +22,19 @@ export const whoopTodaySchema = z.object({
 
 export type WhoopToday = z.infer<typeof whoopTodaySchema>;
 
+// Multi-day WHOOP data
+export const whoopDaySummarySchema = whoopTodaySchema.extend({
+  date: z.string(), // ISO date string (YYYY-MM-DD)
+});
+
+export type WhoopDaySummary = z.infer<typeof whoopDaySummarySchema>;
+
+export const whoopRecentSchema = z.object({
+  days: z.array(whoopDaySummarySchema),
+});
+
+export type WhoopRecent = z.infer<typeof whoopRecentSchema>;
+
 // Training plan request/response
 export const activityTypeSchema = z.enum(['zwift', 'strength', 'walk', 'swim', 'run', 'rest']);
 export type ActivityType = z.infer<typeof activityTypeSchema>;

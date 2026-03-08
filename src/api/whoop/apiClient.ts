@@ -1,5 +1,5 @@
 import { logger } from '../../shared/logger.js';
-import type { WhoopToday } from '../../shared/types.js';
+import type { WhoopToday, WhoopDaySummary, WhoopRecent } from '../../shared/types.js';
 import { getValidAccessToken } from './oauthClient.js';
 
 const WHOOP_API_BASE = 'https://api.prod.whoop.com/developer';
@@ -170,27 +170,8 @@ export async function fetchTodayData(): Promise<WhoopToday | null> {
       }
     }
 
-    // Calculate sleep hours from sleep data
-    let sleepHours = 0;
-    let sleepScore: number | undefined;
-    if (sleepData?.score?.stage_summary) {
-      const totalSleepMilli =
-        sleepData.score.stage_summary.total_light_sleep_time_milli +
-        sleepData.score.stage_summary.total_slow_wave_sleep_time_milli +
-        sleepData.score.stage_summary.total_rem_sleep_time_milli;
-      sleepHours = Math.round((totalSleepMilli / (1000 * 60 * 60)) * 10) / 10;
-      if (typeof sleepData.score.sleep_performance_percentage === 'number') {
-        sleepScore = Math.round(sleepData.score.sleep_performance_percentage * 10) / 10;
-      }
-    } else if (sleepData?.start && sleepData?.end) {
-      const sleepMillis = new Date(sleepData.end).getTime() - new Date(sleepData.start).getTime();
-      if (Number.isFinite(sleepMillis) && sleepMillis > 0) {
-        sleepHours = Math.round((sleepMillis / (1000 * 60 * 60)) * 10) / 10;
-      }
-      if (typeof sleepData?.score?.sleep_performance_percentage === 'number') {
-        sleepScore = Math.round(sleepData.score.sleep_performance_percentage * 10) / 10;
-      }
-    }
+    // Calculate sleep hours from sleep data using shared helper
+    const { sleepHours, sleepScore } = calculateSleepMetrics(sleepData);
 
     const result: WhoopToday = {
       sleepHours,
@@ -219,6 +200,113 @@ export async function fetchTodayData(): Promise<WhoopToday | null> {
     return result;
   } catch (error) {
     logger.error('Failed to fetch WHOOP data', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+interface WhoopRecoveryCollectionResponse {
+  records: WhoopRecoveryResponse[];
+  next_token?: string;
+}
+
+function calculateSleepMetrics(sleepData: WhoopSleep | null): { sleepHours: number; sleepScore: number | undefined } {
+  let sleepHours = 0;
+  let sleepScore: number | undefined;
+
+  if (sleepData?.score?.stage_summary) {
+    const totalSleepMilli =
+      sleepData.score.stage_summary.total_light_sleep_time_milli +
+      sleepData.score.stage_summary.total_slow_wave_sleep_time_milli +
+      sleepData.score.stage_summary.total_rem_sleep_time_milli;
+    sleepHours = Math.round((totalSleepMilli / (1000 * 60 * 60)) * 10) / 10;
+    if (typeof sleepData.score.sleep_performance_percentage === 'number') {
+      sleepScore = Math.round(sleepData.score.sleep_performance_percentage * 10) / 10;
+    }
+  } else if (sleepData?.start && sleepData?.end) {
+    const sleepMillis = new Date(sleepData.end).getTime() - new Date(sleepData.start).getTime();
+    if (Number.isFinite(sleepMillis) && sleepMillis > 0) {
+      sleepHours = Math.round((sleepMillis / (1000 * 60 * 60)) * 10) / 10;
+    }
+    if (typeof sleepData?.score?.sleep_performance_percentage === 'number') {
+      sleepScore = Math.round(sleepData.score.sleep_performance_percentage * 10) / 10;
+    }
+  }
+
+  return { sleepHours, sleepScore };
+}
+
+function buildDaySummary(
+  cycle: WhoopCycleResponse['records'][0],
+  recoveryData: WhoopRecoveryResponse | null,
+  sleepData: WhoopSleep | null,
+): WhoopDaySummary {
+  const { sleepHours, sleepScore } = calculateSleepMetrics(sleepData);
+
+  return {
+    date: cycle.start.split('T')[0]!,
+    sleepHours,
+    recoveryScore: recoveryData?.score?.recovery_score ?? 0,
+    sleepScore,
+    hrv: recoveryData?.score?.hrv_rmssd_milli
+      ? Math.round(recoveryData.score.hrv_rmssd_milli)
+      : undefined,
+    restingHeartRate: recoveryData?.score?.resting_heart_rate,
+    strain: cycle.score?.strain,
+    avgHeartRate: cycle.score?.average_heart_rate,
+    maxHeartRate: cycle.score?.max_heart_rate,
+    kilojoule: cycle.score?.kilojoule,
+    raw: {
+      cycle,
+      sleep: sleepData ?? undefined,
+      recovery: recoveryData ?? undefined,
+    },
+  };
+}
+
+export async function fetchRecentData(days: number): Promise<WhoopRecent> {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+
+  const startISO = start.toISOString();
+  const endISO = end.toISOString();
+  // Buffer limit for timezone edge cases
+  const limit = days + 2;
+
+  try {
+    // Fetch cycles, recoveries, and sleep in parallel
+    const [cycleData, recoveryData, sleepData] = await Promise.all([
+      whoopApiRequest<WhoopCycleResponse>(`/v2/cycle?limit=${limit}&start=${startISO}&end=${endISO}`),
+      whoopApiRequest<WhoopRecoveryCollectionResponse>(`/v2/recovery?limit=${limit}&start=${startISO}&end=${endISO}`),
+      whoopApiRequest<WhoopSleepCollectionResponse>(`/v2/activity/sleep?limit=${limit}&start=${startISO}&end=${endISO}`),
+    ]);
+
+    // Index recoveries and sleep by cycle_id for fast lookup
+    const recoveryByCycle = new Map<number, WhoopRecoveryResponse>();
+    for (const r of recoveryData.records) {
+      recoveryByCycle.set(r.cycle_id, r);
+    }
+
+    const sleepByCycle = new Map<number, WhoopSleep>();
+    for (const s of sleepData.records) {
+      if (!s.nap) {
+        sleepByCycle.set(s.cycle_id, s);
+      }
+    }
+
+    const result: WhoopDaySummary[] = cycleData.records.map((cycle) => {
+      const recovery = recoveryByCycle.get(cycle.id) ?? null;
+      const sleep = sleepByCycle.get(cycle.id) ?? null;
+      return buildDaySummary(cycle, recovery, sleep);
+    });
+
+    logger.info('Fetched recent WHOOP data', { days, cyclesFound: result.length });
+
+    return { days: result };
+  } catch (error) {
+    logger.error('Failed to fetch recent WHOOP data', {
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;

@@ -2,9 +2,10 @@ import type { Request, Response } from 'express';
 import { randomBytes } from 'crypto';
 import { logger } from '../../shared/logger.js';
 import { getConfig } from '../../shared/config.js';
-import { fetchTodayData, isConnected } from '../whoop/apiClient.js';
+import { fetchTodayData, fetchRecentData, isConnected } from '../whoop/apiClient.js';
 import { getAuthorizationUrl, exchangeCodeForTokens } from '../whoop/oauthClient.js';
-import { clearTokens } from '../whoop/tokenStorage.js';
+import { clearTokens, loadTokens } from '../whoop/tokenStorage.js';
+import { forceRefresh } from '../whoop/tokenKeepAlive.js';
 
 export async function handleWhoopToday(_req: Request, res: Response): Promise<void> {
   const config = getConfig();
@@ -44,6 +45,56 @@ export async function handleWhoopToday(_req: Request, res: Response): Promise<vo
     res.json(data);
   } catch (error) {
     logger.error('Failed to fetch WHOOP data', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(500).json({
+      error: 'Failed to fetch WHOOP data',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
+
+// Get recent WHOOP data (multiple days)
+export async function handleWhoopRecent(req: Request, res: Response): Promise<void> {
+  const config = getConfig();
+
+  if (!config.WHOOP_CLIENT_ID || !config.WHOOP_CLIENT_SECRET) {
+    logger.info('WHOOP integration not configured');
+    res.status(503).json({
+      error: 'WHOOP integration not available',
+      message: 'WHOOP credentials are not configured',
+    });
+    return;
+  }
+
+  const connected = await isConnected();
+  if (!connected) {
+    res.status(401).json({
+      error: 'WHOOP not connected',
+      message: 'Please connect your WHOOP account first',
+      connectUrl: '/api/whoop/connect',
+    });
+    return;
+  }
+
+  // Parse days param: default 5, clamp to 1-7
+  const rawDays = Number(req.query['days']);
+  const days = Number.isFinite(rawDays) ? Math.min(7, Math.max(1, Math.round(rawDays))) : 5;
+
+  try {
+    const data = await fetchRecentData(days);
+
+    if (data.days.length === 0) {
+      res.status(404).json({
+        error: 'No data available',
+        message: `No WHOOP data found for the last ${days} days`,
+      });
+      return;
+    }
+
+    res.json(data);
+  } catch (error) {
+    logger.error('Failed to fetch recent WHOOP data', {
       error: error instanceof Error ? error.message : String(error),
     });
     res.status(500).json({
@@ -144,6 +195,41 @@ export async function handleWhoopStatus(_req: Request, res: Response): Promise<v
     message: connected ? 'WHOOP is connected' : 'WHOOP is not connected',
     connectUrl: connected ? undefined : '/api/whoop/connect',
   });
+}
+
+// Force token refresh
+export async function handleWhoopRefresh(_req: Request, res: Response): Promise<void> {
+  const tokens = await loadTokens();
+
+  if (!tokens) {
+    res.status(404).json({
+      error: 'No tokens stored',
+      message: 'No WHOOP connection exists. Please connect first.',
+      connectUrl: '/api/whoop/connect',
+    });
+    return;
+  }
+
+  try {
+    await forceRefresh();
+    const connected = await isConnected();
+
+    res.json({
+      refreshed: connected,
+      message: connected
+        ? 'Token refreshed successfully'
+        : 'Token refresh failed — re-authentication may be required',
+      connectUrl: connected ? undefined : '/api/whoop/connect',
+    });
+  } catch (error) {
+    logger.error('Manual token refresh failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(500).json({
+      error: 'Token refresh failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 }
 
 // Disconnect WHOOP
