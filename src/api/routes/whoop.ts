@@ -6,6 +6,7 @@ import { fetchTodayData, fetchRecentData, isConnected } from '../whoop/apiClient
 import { getAuthorizationUrl, exchangeCodeForTokens } from '../whoop/oauthClient.js';
 import { clearTokens, loadTokens } from '../whoop/tokenStorage.js';
 import { forceRefresh } from '../whoop/tokenKeepAlive.js';
+import { getCachedToday, getCachedRecent } from '../whoop/dataCache.js';
 
 export async function handleWhoopToday(_req: Request, res: Response): Promise<void> {
   const config = getConfig();
@@ -47,6 +48,15 @@ export async function handleWhoopToday(_req: Request, res: Response): Promise<vo
     logger.error('Failed to fetch WHOOP data', {
       error: error instanceof Error ? error.message : String(error),
     });
+
+    // Fallback to cached data
+    const cached = await getCachedToday();
+    if (cached) {
+      logger.info('Serving cached today data', { fetchedAt: cached.fetchedAt });
+      res.json({ ...cached.data, stale: true, fetchedAt: cached.fetchedAt });
+      return;
+    }
+
     res.status(500).json({
       error: 'Failed to fetch WHOOP data',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -97,6 +107,15 @@ export async function handleWhoopRecent(req: Request, res: Response): Promise<vo
     logger.error('Failed to fetch recent WHOOP data', {
       error: error instanceof Error ? error.message : String(error),
     });
+
+    // Fallback to cached data
+    const cached = await getCachedRecent();
+    if (cached) {
+      logger.info('Serving cached recent data', { fetchedAt: cached.fetchedAt });
+      res.json({ ...cached.data, stale: true, fetchedAt: cached.fetchedAt });
+      return;
+    }
+
     res.status(500).json({
       error: 'Failed to fetch WHOOP data',
       message: error instanceof Error ? error.message : 'Unknown error',
