@@ -21,9 +21,15 @@ export async function handleWhoopToday(_req: Request, res: Response): Promise<vo
     return;
   }
 
-  // Check if connected
+  // Check if connected — if not, try cache before returning error
   const connected = await isConnected();
   if (!connected) {
+    const cached = await getCachedToday();
+    if (cached) {
+      logger.info('WHOOP not connected, serving cached today data', { fetchedAt: cached.fetchedAt });
+      res.json({ ...cached.data, stale: true, fetchedAt: cached.fetchedAt });
+      return;
+    }
     res.status(401).json({
       error: 'WHOOP not connected',
       message: 'Please connect your WHOOP account first',
@@ -79,6 +85,12 @@ export async function handleWhoopRecent(req: Request, res: Response): Promise<vo
 
   const connected = await isConnected();
   if (!connected) {
+    const cached = await getCachedRecent();
+    if (cached) {
+      logger.info('WHOOP not connected, serving cached recent data', { fetchedAt: cached.fetchedAt });
+      res.json({ ...cached.data, stale: true, fetchedAt: cached.fetchedAt });
+      return;
+    }
     res.status(401).json({
       error: 'WHOOP not connected',
       message: 'Please connect your WHOOP account first',
